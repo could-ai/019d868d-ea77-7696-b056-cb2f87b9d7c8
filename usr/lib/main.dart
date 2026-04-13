@@ -1,123 +1,364 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(const OmarsFootballApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class OmarsFootballApp extends StatelessWidget {
+  const OmarsFootballApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
-      debugShowCheckedModeBanner: false,
+      title: 'Omars Football',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
+        useMaterial3: true,
       ),
-      initialRoute: '/',
-      routes: {
-        '/': (context) => const MyHomePage(title: 'Flutter Demo Home Page'),
-      },
+      home: const GameScreen(),
+      debugShowCheckedModeBanner: false,
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class GameScreen extends StatefulWidget {
+  const GameScreen({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<GameScreen> createState() => _GameScreenState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateMixin {
+  late Ticker _ticker;
+  
+  // Game state
+  double playerX = 150;
+  double playerY = 300;
+  double playerSpeed = 200; // pixels per second
+  
+  double ballX = 200;
+  double ballY = 200;
+  double ballVX = 0;
+  double ballVY = 0;
+  double ballFriction = 0.98;
+  
+  int score = 0;
+  
+  // Input state
+  double joystickX = 0;
+  double joystickY = 0;
+  bool isKicking = false;
+  
+  // Pitch dimensions (will be updated on layout)
+  double pitchWidth = 400;
+  double pitchHeight = 600;
 
-  void _incrementCounter() {
+  @override
+  void initState() {
+    super.initState();
+    _ticker = createTicker(_tick)..start();
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    super.dispose();
+  }
+
+  void _tick(Duration elapsed) {
+    // Delta time in seconds (approximate 60fps = 0.016s)
+    // For simplicity, we'll use a fixed dt or calculate it
+    // Actually, let's just use a fixed small dt for stability
+    double dt = 0.016;
+    
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      // Move player
+      playerX += joystickX * playerSpeed * dt;
+      playerY += joystickY * playerSpeed * dt;
+      
+      // Clamp player to pitch
+      playerX = playerX.clamp(20, pitchWidth - 20);
+      playerY = playerY.clamp(20, pitchHeight - 20);
+      
+      // Move ball
+      ballX += ballVX * dt;
+      ballY += ballVY * dt;
+      
+      // Apply friction
+      ballVX *= ballFriction;
+      ballVY *= ballFriction;
+      
+      // Stop ball if very slow
+      if (ballVX.abs() < 5) ballVX = 0;
+      if (ballVY.abs() < 5) ballVY = 0;
+      
+      // Ball collision with walls
+      if (ballX <= 10) {
+        ballX = 10;
+        ballVX = -ballVX * 0.8;
+      } else if (ballX >= pitchWidth - 10) {
+        ballX = pitchWidth - 10;
+        ballVX = -ballVX * 0.8;
+      }
+      
+      if (ballY <= 10) {
+        // Top wall - check for goal
+        if (ballX > pitchWidth / 2 - 50 && ballX < pitchWidth / 2 + 50) {
+          // GOAL!
+          score++;
+          _resetPositions();
+        } else {
+          ballY = 10;
+          ballVY = -ballVY * 0.8;
+        }
+      } else if (ballY >= pitchHeight - 10) {
+        ballY = pitchHeight - 10;
+        ballVY = -ballVY * 0.8;
+      }
+      
+      // Player and ball collision / kicking
+      double dx = ballX - playerX;
+      double dy = ballY - playerY;
+      double distance = sqrt(dx * dx + dy * dy);
+      
+      if (distance < 30) {
+        // Push ball away
+        double pushForce = isKicking ? 500 : 100;
+        double angle = atan2(dy, dx);
+        ballVX = cos(angle) * pushForce;
+        ballVY = sin(angle) * pushForce;
+        
+        if (isKicking) {
+          isKicking = false; // Reset kick after contact
+        }
+      }
     });
+  }
+
+  void _resetPositions() {
+    playerX = pitchWidth / 2;
+    playerY = pitchHeight - 100;
+    ballX = pitchWidth / 2;
+    ballY = pitchHeight / 2;
+    ballVX = 0;
+    ballVY = 0;
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
+      backgroundColor: Colors.black,
+      body: SafeArea(
         child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text('You have pushed the button this many times:'),
-            Text('$_counter', style: Theme.of(context).textTheme.headlineMedium),
+          children: [
+            // Scoreboard
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: Colors.grey[900],
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'OMARS FOOTBALL',
+                    style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(width: 20),
+                  Text(
+                    'SCORE: $score',
+                    style: const TextStyle(color: Colors.yellow, fontSize: 24, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+            
+            // Game Area
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  pitchWidth = constraints.maxWidth;
+                  pitchHeight = constraints.maxHeight;
+                  
+                  return GestureDetector(
+                    onPanStart: (details) => _updateJoystick(details.localPosition, constraints),
+                    onPanUpdate: (details) => _updateJoystick(details.localPosition, constraints),
+                    onPanEnd: (_) => _resetJoystick(),
+                    child: CustomPaint(
+                      size: Size(pitchWidth, pitchHeight),
+                      painter: PitchPainter(
+                        playerX: playerX,
+                        playerY: playerY,
+                        ballX: ballX,
+                        ballY: ballY,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            
+            // Controls Area
+            Container(
+              height: 120,
+              color: Colors.grey[900],
+              padding: const EdgeInsets.symmetric(horizontal: 30),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // Virtual Joystick visualization
+                  Container(
+                    width: 100,
+                    height: 100,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Center(
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        transform: Matrix4.translationValues(joystickX * 30, joystickY * 30, 0),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.5),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                  ),
+                  
+                  // Kick Button
+                  GestureDetector(
+                    onTapDown: (_) => setState(() => isKicking = true),
+                    onTapUp: (_) => setState(() => isKicking = false),
+                    onTapCancel: () => setState(() => isKicking = false),
+                    child: Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        color: isKicking ? Colors.red[700] : Colors.red,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.redAccent.withOpacity(0.5),
+                            blurRadius: 10,
+                            spreadRadius: 2,
+                          )
+                        ],
+                      ),
+                      child: const Center(
+                        child: Text(
+                          'KICK',
+                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
+  }
+
+  void _updateJoystick(Offset position, BoxConstraints constraints) {
+    // We'll use the bottom left area for joystick if touched there, 
+    // but since we have a dedicated control area, let's just use the touch on the pitch for movement for now,
+    // or better, let's make the joystick area handle the pan.
+    // Actually, let's just use a simple tap-to-move or drag-to-move on the pitch.
+    
+    // Calculate direction from player to touch
+    double dx = position.dx - playerX;
+    double dy = position.dy - playerY;
+    double distance = sqrt(dx * dx + dy * dy);
+    
+    if (distance > 0) {
+      setState(() {
+        joystickX = dx / distance;
+        joystickY = dy / distance;
+      });
+    }
+  }
+
+  void _resetJoystick() {
+    setState(() {
+      joystickX = 0;
+      joystickY = 0;
+    });
+  }
+}
+
+class PitchPainter extends CustomPainter {
+  final double playerX;
+  final double playerY;
+  final double ballX;
+  final double ballY;
+
+  PitchPainter({
+    required this.playerX,
+    required this.playerY,
+    required this.ballX,
+    required this.ballY,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Draw grass
+    final grassPaint = Paint()..color = const Color(0xFF2E7D32);
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), grassPaint);
+    
+    // Draw pitch lines
+    final linePaint = Paint()
+      ..color = Colors.white.withOpacity(0.7)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3;
+      
+    // Outer bounds
+    canvas.drawRect(Rect.fromLTWH(10, 10, size.width - 20, size.height - 20), linePaint);
+    
+    // Center line
+    canvas.drawLine(Offset(10, size.height / 2), Offset(size.width - 10, size.height / 2), linePaint);
+    
+    // Center circle
+    canvas.drawCircle(Offset(size.width / 2, size.height / 2), 50, linePaint);
+    
+    // Top penalty area
+    canvas.drawRect(Rect.fromLTWH(size.width / 2 - 100, 10, 200, 80), linePaint);
+    
+    // Bottom penalty area
+    canvas.drawRect(Rect.fromLTWH(size.width / 2 - 100, size.height - 90, 200, 80), linePaint);
+    
+    // Top Goal
+    final goalPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 5;
+    canvas.drawLine(Offset(size.width / 2 - 50, 10), Offset(size.width / 2 + 50, 10), goalPaint);
+    
+    // Draw Player
+    final playerPaint = Paint()..color = Colors.blue;
+    canvas.drawCircle(Offset(playerX, playerY), 15, playerPaint);
+    
+    // Draw Player direction indicator (nose)
+    final nosePaint = Paint()..color = Colors.white;
+    canvas.drawCircle(Offset(playerX, playerY - 10), 5, nosePaint);
+
+    // Draw Ball
+    final ballPaint = Paint()..color = Colors.white;
+    canvas.drawCircle(Offset(ballX, ballY), 10, ballPaint);
+    
+    // Ball pattern (simple pentagon/hexagon illusion)
+    final ballDetailPaint = Paint()..color = Colors.black;
+    canvas.drawCircle(Offset(ballX, ballY), 4, ballDetailPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant PitchPainter oldDelegate) {
+    return oldDelegate.playerX != playerX ||
+           oldDelegate.playerY != playerY ||
+           oldDelegate.ballX != ballX ||
+           oldDelegate.ballY != ballY;
   }
 }
